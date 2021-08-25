@@ -117,7 +117,7 @@ process collect_images {
 set -e
 
 # Combine all of the images
-tar cvf output_images.tar *${params.output_img}
+tar cvfh output_images.tar *${params.output_img}
 
 # Compress the tar
 gzip output_images.tar
