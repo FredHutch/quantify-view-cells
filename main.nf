@@ -68,7 +68,7 @@ workflow {
 
     // Add an index column to the manifest
     validate_sample_sheet(
-        Channel.from(file(params.sample_sheet))
+        Channel.fromPath(params.sample_sheet)
     )
 
 }
@@ -84,12 +84,34 @@ process validate_sample_sheet {
     script:
 """#!/bin/bash
 
-# Add an index column to the sample sheet
-cat "${sample_sheet_csv}" | \
-awk -f validate_sample_sheet.awk > \
-TEMP && \
-mv TEMP "${sample_sheet_csv}"
+set -e
 
+# Make sure that the sample sheet has 'uri' in the first row
+if [[ \$(head -1 "${sample_sheet_csv}" | grep -c uri) == 0 ]]; then
+
+    # Report the error
+    echo "Sample sheet must contain a column named 'uri'"
+
+    # Prevent any further analysis
+    rm ${sample_sheet_csv}
+
+else
+
+    # Add an index column to the sample sheet
+    i=0
+    cat "${sample_sheet_csv}" | \
+    while read line; do
+        if (( \$i == 0 )); then
+            echo ix,\$line
+        else
+            echo \$i,\$line
+        fi
+        let "i=i+1"
+    done \
+    > TEMP && \
+    mv TEMP "${sample_sheet_csv}"
+
+fi
 """
 
 }
