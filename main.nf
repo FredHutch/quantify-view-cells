@@ -68,7 +68,7 @@ workflow {
 
     // Add an index column to the manifest
     validate_sample_sheet(
-        Channel.fromPath(params.sample_sheet)
+        Channel.from(file(params.sample_sheet))
     )
 
 }
