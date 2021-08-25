@@ -11,6 +11,9 @@ params.sample_sheet = false
 params.output = false
 params.concat_n = 100
 params.module = ""
+params.max_threads = 10000
+params.output_csv = "output.csv"
+params.output_img = "output.tif"
 
 // Function which prints help message text
 def helpMessage() {
@@ -32,6 +35,9 @@ Required Arguments:
 Optional Arguments:
     --concat_n              Number of tabular results to combine/concatenate in the first round (default: 100)
     --module                If specified, load the specified EasyBuild module(s). Multiple modules may be specified in a colon-delimited list.
+    --max_threads           If needed, limit the number of concurrent processes
+    --output_csv            Name of the CSV produced by the analysis script
+    --output_img            Name of the image produced by the analysis script
 
 Webpage: https://github.com/FredHutch/quantify-view-cells
     """.stripIndent()
@@ -91,13 +97,15 @@ process run_script {
   
     // Load the module(s) specified by the user
     module params.module
+    maxForks params.max_threads
   
     input:
         tuple val(ix), path("input.czi")
         path assets
 
     output:
-        tuple val(ix), path("output.mat")
+        tuple val(ix), path(params.output_csv), emit: csv
+        tuple val(ix), path(params.output_img), emit: img
 
     script:
 """#!/bin/bash
