@@ -55,7 +55,7 @@ workflow {
 
         // Set up a channel pointing to those files
         assets_ch = Channel
-            .fromPath(params.assets.split(","))
+            .fromPath(params.assets.tokenize(","))
             .toSortedList()
 
     } else {
