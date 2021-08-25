@@ -62,7 +62,7 @@ workflow {
 
         // If no assets were specified
         // Make an empty channel
-        assets_ch = Channel.of([])
+        assets_ch = Channel.empty()
 
     }
 
