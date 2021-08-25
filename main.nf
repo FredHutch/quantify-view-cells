@@ -9,7 +9,6 @@ params.function_call = false
 params.assets = false
 params.sample_sheet = false
 params.output = false
-params.concat_n = 100
 params.module = ""
 params.max_threads = 10000
 params.output_csv = "output.csv"
@@ -29,11 +28,12 @@ Required Arguments:
                             directory in order for the script to run.
                             Multiple files (or folders) can be specified with a comma-delimited
                             list, while also supporting wildcards. Double wildcards cross directory boundaries.
-    --sample_sheet          List of images to process using the specified analysis
+    --sample_sheet          List of images to process using the specified analysis.
+                            The file must be in CSV format, and the path to the image must be
+                            listed in a column named 'uri'.
     --output                Path to output directory
 
 Optional Arguments:
-    --concat_n              Number of tabular results to combine/concatenate in the first round (default: 100)
     --module                If specified, load the specified EasyBuild module(s). Multiple modules may be specified in a colon-delimited list.
     --max_threads           If needed, limit the number of concurrent processes
     --output_csv            Name of the CSV produced by the analysis script
@@ -91,6 +91,91 @@ workflow {
         assets_ch
     )
 
+    // Collect and compress the image outputs
+    collect_images(
+        run_script.out.img.toSortedList()
+    )
+
+    // Collect and summarize the tables
+    collect_tables(
+        run_script.out.csv.toSortedList()
+    )
+
+}
+
+process collect_images {
+
+    publishDir params.output, mode: "copy", overwrite: true
+    input:
+        file "*"
+
+    output:
+        file "output_images.tar.gz"
+
+"""#!/bin/bash
+
+set -e
+
+# Combine all of the images
+tar cvf output_images.tar *${params.output_img}
+
+# Compress the tar
+gzip output_images.tar
+"""
+
+}
+
+process collect_tables {
+
+    // Load the module(s) specified by the user
+    module params.module
+    publishDir params.output, mode: "copy", overwrite: true
+    input:
+        file "*"
+
+    output:
+        file "feature.info.csv.gz"
+        file "image.summary.csv.gz"
+
+"""#!/usr/bin/env python3
+
+import os
+import pandas as pd
+
+# Combine all of the tables, appending a column indicating the image index
+df = pd.concat(
+    [
+        pd.read_csv(fp).assign(
+            ix=fp.replace(".${params.output_csv}", "")
+        )
+        for fp in os.listdir(".")
+        if fp.endswith(".${params.output_csv}")
+    ]
+)
+
+# Write out the combined per-feature table
+df.to_csv("feature.info.csv.gz", index=None)
+
+# Function to test if all values in a Series are numeric
+def is_numeric(v):
+    return v.apply(
+        lambda s: pd.to_numeric(s, errors="coerce")
+    ).notnull(
+    ).all()
+
+# Get the list of columns in the table which are all numeric
+num_cols = [c for c, v in df.items() if is_numeric(v)]
+
+# Summarize each metric per image
+summary = df.groupby("ix").apply(
+    lambda d: d.reindex(columns=num_cols).median()
+)
+
+# Write out the summary table
+summary.to_csv("image.summary.csv.gz", index=None)
+
+"""
+
 }
 
 process run_script {
@@ -104,8 +189,8 @@ process run_script {
         path assets
 
     output:
-        tuple val(ix), path(params.output_csv), emit: csv
-        tuple val(ix), path(params.output_img), emit: img
+        path "${ix}.${params.output_csv}", emit: csv
+        path "${ix}.${params.output_img}", emit: img
 
     script:
 """#!/bin/bash
@@ -113,6 +198,10 @@ process run_script {
 set -e
 
 matlab -nodisplay -nosplash -nodesktop -r "${params.function_call}"
+
+# Add the index to the output filenames
+mv "${params.output_csv}" "${ix}.${params.output_csv}"
+mv "${params.output_img}" "${ix}.${params.output_img}"
 """
 
 }

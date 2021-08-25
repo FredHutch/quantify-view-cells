@@ -49,17 +49,49 @@ Usage:
 nextflow run FredHutch/quantify-view-cells <ARGUMENTS>
 
 Required Arguments:
-    --script                Script to be run on each image
+    --function_call         Formatted function call which will analyze an image
+                            (named 'input.czi') and write an output (named 'output.mat')
     --assets                Any additional files which should be present in the working
                             directory in order for the script to run.
                             Multiple files (or folders) can be specified with a comma-delimited
-                            list, while also supporting wildcards.
-    --sample_sheet          List of images to process using the specified analysis
+                            list, while also supporting wildcards. Double wildcards cross directory boundaries.
+    --sample_sheet          List of images to process using the specified analysis.
+                            The file must be in CSV format, and the path to the image must be
+                            listed in a column named 'uri'.
     --output                Path to output directory
 
 Optional Arguments:
-    --concat_n              Number of tabular results to combine/concatenate in the first round (default: 100)
     --module                If specified, load the specified EasyBuild module(s). Multiple modules may be specified in a colon-delimited list.
+    --max_threads           If needed, limit the number of concurrent processes
+    --output_csv            Name of the CSV produced by the analysis script
+    --output_img            Name of the image produced by the analysis script
 
 Webpage: https://github.com/FredHutch/quantify-view-cells
 ```
+
+## Preparing Your Code
+
+The guiding principle for this workflow is that a user has created a set of files
+which can be parsed by MATLAB and executed on a single image input (.czi) to produce
+two files, an image output and a table of data in CSV format. To make this as flexible
+as possible, the user can invoke their code using the following flags:
+
+- `function_call`: The actual MATLAB code which is invoked to process a single image input file
+named `input.czi`. This code will be executed as part of the following command: `matlab -nodisplay -nosplash -nodesktop -r {function_call}`
+- `assets`: All of the MATLAB files which will be present in the working directory when the above function is called. Wildcards make this flag more convenient to format, with `/path/to/folder/**.m` being sufficient to identify all of the files ending with `.m` across all subdirectories under `/path/to/folder/`. More than one file or glob can be specified as a comma-delimited list (no spaces).
+- `output_csv`: Use this flag to specify the name of the output CSV which is produced by the function call.
+- `output_img`: Use this flag to specify the name of the output image which is produced by the function call.
+- `max_threads`: Use this flag to limit the number of concurrent processes, to avoid going over any license limits.
+
+## Output Files
+
+After running the workflow, three files will be copied to the output directory:
+
+- `output_images.tar.gz`: A compressed archive containing all of the image outputs.
+The name of each file will be `{ix}.{output_img}`, where `{ix}` is the number of the line
+from the sample sheet which listed the input image, and `{output_img}` is the name
+of the image output by the MATLAB code.
+- `feature.info.csv.gz`: A table in CSV format which combines all of the outputs produced
+from all images. The `ix` column indicates which image was used to generate the outputs.
+- `image.summary.csv.gz`: A table in CSV format which contains the median numeric value
+for each image, for every column of the feature info table which only contains numbers.
