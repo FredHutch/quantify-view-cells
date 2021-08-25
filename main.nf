@@ -5,12 +5,12 @@ nextflow.enable.dsl=2
 
 // Set default parameters
 params.help = false
-params.script = false
+params.function_call = false
 params.assets = false
 params.sample_sheet = false
 params.output = false
 params.concat_n = 100
-params.module = false
+params.module = ""
 
 // Function which prints help message text
 def helpMessage() {
@@ -20,17 +20,18 @@ Usage:
 nextflow run FredHutch/quantify-view-cells <ARGUMENTS>
 
 Required Arguments:
-    --script                Script to be run on each image
+    --function_call         Formatted function call which will analyze an image
+                            (named 'input.czi') and write an output (named 'output.mat')
     --assets                Any additional files which should be present in the working
                             directory in order for the script to run.
                             Multiple files (or folders) can be specified with a comma-delimited
-                            list, while also supporting wildcards.
+                            list, while also supporting wildcards. Double wildcards cross directory boundaries.
     --sample_sheet          List of images to process using the specified analysis
     --output                Path to output directory
 
 Optional Arguments:
     --concat_n              Number of tabular results to combine/concatenate in the first round (default: 100)
-    --module                If specified, load the specified EasyBuild module
+    --module                If specified, load the specified EasyBuild module(s). Multiple modules may be specified in a colon-delimited list.
 
 Webpage: https://github.com/FredHutch/quantify-view-cells
     """.stripIndent()
@@ -40,15 +41,12 @@ Webpage: https://github.com/FredHutch/quantify-view-cells
 workflow {
 
     // Show help message if the user specifies the --help flag at runtime
-    if (params.help || !params.script || !params.sample_sheet || !params.output){
+    if (params.help || !params.function_call || !params.sample_sheet || !params.output){
         // Invoke the function above which prints the help message
         helpMessage()
         // Exit out and do not run anything else
         exit 0
     }
-
-    // Point to the script
-    script = file(params.script)
 
     // If there are assets specified
     if (params.assets) {
@@ -70,6 +68,44 @@ workflow {
     validate_sample_sheet(
         Channel.fromPath(params.sample_sheet)
     )
+
+    // Make a channel which includes
+        // The numeric index of each image
+        // The image file
+        // Any additional assets
+    img_ch = validate_sample_sheet
+        .out
+        .splitCsv(header: true)
+        .flatten()
+        .map {row -> [row.ix, file(row.uri)]}
+
+    // Run the script on each file
+    run_script(
+        img_ch,
+        assets_ch
+    )
+
+}
+
+process run_script {
+  
+    // Load the module(s) specified by the user
+    module params.module
+  
+    input:
+        tuple val(ix), path("input.czi")
+        path assets
+
+    output:
+        tuple val(ix), path("output.mat")
+
+    script:
+"""#!/bin/bash
+
+set -e
+
+matlab -nodisplay -nosplash -nodesktop -r "${params.function_call}"
+"""
 
 }
 

@@ -59,7 +59,7 @@ Required Arguments:
 
 Optional Arguments:
     --concat_n              Number of tabular results to combine/concatenate in the first round (default: 100)
-    --module                If specified, load the specified EasyBuild module
+    --module                If specified, load the specified EasyBuild module(s). Multiple modules may be specified in a colon-delimited list.
 
-Workflow: https://github.com/FredHutch/quantify-view-cells
+Webpage: https://github.com/FredHutch/quantify-view-cells
 ```
