@@ -153,6 +153,13 @@ class VizApp:
         self.summary = summary
         self.images = images
 
+        # Make a list of all columns in the feature data which are numeric
+        self.numeric_cols = [
+            col_name
+            for col_name, col_values in self.features.items()
+            if is_numeric(col_values)
+        ]
+
         # Sort the images by index
         self.summary.sort_values(
             by="ix",
@@ -180,9 +187,11 @@ class VizApp:
                 # Below that is a table summarizing each image
                 self.layout_image_table(),
 
+                html.Hr(),
+
                 # Next we have a menu allowing the user to filter
                 # the data points which are shown below
-                self.layout_filter_data(),
+                *self.layout_filter_data(),
 
                 # Finally, the bottom has an interactive
                 # figure generation utility with flexible menus
@@ -299,10 +308,174 @@ class VizApp:
 
 
     def layout_filter_data(self):
-        return "FILTER DATA PLACEHOLDER\n\n"
+
+        initial_column = self.numeric_cols[0]
+
+        return [
+            dbc.Row(
+                [
+                    dbc.Col(
+                        "Filter Data By:"
+                    ),
+                    dbc.Col(
+                        "Minimum Value:"
+                    ),
+                    dbc.Col(
+                        "Maximum Value:"
+                    )
+                ]
+            ),
+            dbc.Row(
+                [
+                    dbc.Col(
+                        dcc.Dropdown(
+                            id="filter-data-by",
+                            options=[
+                                {'label': i, 'value': i}
+                                for i in self.numeric_cols
+                            ],
+                            value=initial_column,
+                            multi=False
+                        )
+                    ),
+                    dbc.Col(
+                        dbc.Input(
+                            id="filter-min-value",
+                            type="number",
+                            min=self.features[initial_column].min(),
+                            max=self.features[initial_column].max(),
+                            value=self.features[initial_column].min(),
+                        )
+                    ),
+                    dbc.Col(
+                        dbc.Input(
+                            id="filter-max-value",
+                            type="number",
+                            min=self.features[initial_column].min(),
+                            max=self.features[initial_column].max(),
+                            value=self.features[initial_column].max(),
+                        )
+                    ),
+                ]
+            )
+        ]
 
     def layout_summary_figure(self):
-        return "SUMMARY FIGURE PLACEHOLDER\n\n"
+        return dbc.Row(
+            [
+                dbc.Col(
+                    self.layout_figure_options(),
+                    width=4
+                ),
+                dbc.Col(
+                    self.layout_figure_display(),
+                    width=8
+                )
+            ]
+        )
+
+    def layout_figure_options(self):
+        return [
+            html.Br(),
+            "Display Type",
+            html.Br(),
+            dcc.Dropdown(
+                id="display-type",
+                options=[
+                    {"label": i.title(), "value": i}
+                    for i in [
+                        "scatter",
+                        "heatmap",
+                        "contour",
+                    ]
+                ],
+                value="scatter"
+            ),
+            html.Br(),
+            "X-axis",
+            html.Br(),
+            dcc.Dropdown(
+                id="display-x",
+                options=[
+                    {"label": i, "value": i}
+                    for i in self.numeric_cols
+                ],
+                value=self.numeric_cols[0]
+            ),
+            html.Br(),
+            "Y-axis",
+            html.Br(),
+            dcc.Dropdown(
+                id="display-y",
+                options=[
+                    {"label": i, "value": i}
+                    for i in self.numeric_cols
+                ],
+                value=self.numeric_cols[1]
+            )
+        ]
+
+    def layout_figure_display(self):
+
+        initial_type = "scatter"
+        initial_x = self.numeric_cols[0]
+        initial_y = self.numeric_cols[1]
+
+        filter_col = self.numeric_cols[0]
+        filter_values = self.features[filter_col]
+        filter_min = filter_values.min()
+        filter_max = filter_values.max()
+        
+        return dcc.Graph(
+            figure=self.feature_display(
+                initial_type,
+                initial_x,
+                initial_y,
+                filter_col,
+                filter_min,
+                filter_max,
+            ),
+            id="figure-display"
+        )
+
+    def feature_display(
+        self,
+        figure_type,
+        x_col,
+        y_col,
+        filter_col,
+        filter_min,
+        filter_max
+    ):
+
+        # Define the function which will be used
+        plotly_f = dict(
+            scatter = px.scatter,
+            heatmap = px.density_heatmap,
+            contour = px.density_contour,
+        )[figure_type]
+
+        filtered_data = self.features.query(
+            f"{filter_col} >= {filter_min}"
+        ).query(
+            f"{filter_col} <= {filter_max}"
+        )
+
+        msg = f"Filtering invalid: {filter_col} >= {filter_min}, <= {filter_max}"
+        assert filtered_data.shape[0] > 0, msg
+
+        fig = plotly_f(
+            filtered_data,
+            x=x_col,
+            y=y_col,
+        )
+
+        fig.update_layout(
+            paper_bgcolor='rgba(0,0,0,0)',
+            plot_bgcolor='rgba(0,0,0,0)'
+        )
+
+        return fig
 
     def decorate_callbacks(self):
         """Define the interactivity of the app"""
@@ -331,6 +504,69 @@ class VizApp:
 
             # Show that image
             return px.imshow(img)
+
+        # Update the min and max for the filter column
+        @self.app.callback(
+            [
+                Output("filter-min-value", "min"),
+                Output("filter-min-value", "max"),
+                Output("filter-min-value", "value"),
+                Output("filter-max-value", "min"),
+                Output("filter-max-value", "max"),
+                Output("filter-max-value", "value"),
+            ],
+            [
+                Input("filter-data-by", "value")
+            ]
+        )
+        def update_filter_min_max(col_name):
+
+            response = CallbackResponse(
+                [
+                    lambda d: d['values'].min(),
+                    lambda d: d['values'].max(),
+                    lambda d: d['values'].min(),
+                    lambda d: d['values'].min(),
+                    lambda d: d['values'].max(),
+                    lambda d: d['values'].max(),
+                ],
+                dict(
+                    values=None
+                )
+            )
+
+            return response.resolve(
+                values=self.features[col_name]
+            )
+
+        # Update the figure display
+        @self.app.callback(
+            Output("figure-display", "figure"),
+            [
+                Input("display-type", "value"),
+                Input("display-x", "value"),
+                Input("display-y", "value"),
+                Input("filter-data-by", "value"),
+                Input("filter-min-value", "value"),
+                Input("filter-max-value", "value"),
+            ]
+        )
+        def update_figure_display(
+            figure_type,
+            x_col,
+            y_col,
+            filter_col,
+            filter_min,
+            filter_max
+        ):
+            return self.feature_display(
+                figure_type,
+                x_col,
+                y_col,
+                filter_col,
+                filter_min,
+                filter_max
+            )
 
     def run_server(
         self,
@@ -373,6 +609,13 @@ def select_sigfigs(df):
             decimals[col_name] = -1 * (om - 4)
     
     return decimals
+
+# Function to test if all values in a Series are numeric
+def is_numeric(v):
+    return v.apply(
+        lambda s: pd.to_numeric(s, errors="coerce")
+    ).notnull(
+    ).all()
 
 if __name__ == "__main__":
 
