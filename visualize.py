@@ -9,8 +9,12 @@ import dash_table
 from dash.dependencies import Input, Output, State, MATCH, ALL
 from dash.exceptions import PreventUpdate
 import logging
+import numpy as np
 import os
 import pandas as pd
+import plotly.express as px
+import plotly.graph_objects as go
+from skimage import io
 import tarfile
 
 
@@ -25,14 +29,20 @@ def read_csv(fp):
 def read_images(fp):
 
     logger = logging.getLogger()
-    logger.info(f"Reading in {fp}")
-    with tarfile.open(fp, "r:gz") as tar:
 
-        images = {
-            filename: tar.extractfile(filename).read()
-            for filename in tar.getnames()
-        }
-    logger.info(f"Read in {len(images):,} images")
+    # Extract the archive, if it hasn't been already
+    folder = f"{fp}.extracted"
+    if not os.path.exists(folder):
+        os.mkdir(folder)
+        logger.info(f"Decompressing {fp} into {folder}")
+        with tarfile.open(fp, "r:gz") as tar:
+            tar.extractall(folder)
+
+    # Keep track of the path for each image
+    images = {
+        int(fn.split(".", 1)[0]): os.path.join(folder, fn)
+        for fn in os.listdir(folder)
+    }
 
     return images
 
@@ -143,6 +153,17 @@ class VizApp:
         self.summary = summary
         self.images = images
 
+        # Sort the images by index
+        self.summary.sort_values(
+            by="ix",
+            inplace=True
+        )
+
+        # Rename the `ix` column to `id`
+        self.summary = self.summary.rename(
+            columns=dict(ix="id")
+        )
+
         # Set up the layout
         self.app.layout = self.layout
 
@@ -169,9 +190,147 @@ class VizApp:
             ]
         )
 
+    def layout_image_display(self):
+
+        # Initialize the display with the first image
+        img = io.imread(self.images[1])
+        
+        return dbc.Row(
+            [
+                dbc.Col(
+                    dcc.Graph(
+                        figure=px.imshow(img),
+                        id='image-display'
+                    ),
+                    width=8
+                ),
+                dbc.Col(
+                    [
+                        "Show Image (#)",
+                        html.Br(),
+                        dcc.Dropdown(
+                            id="image-display-selector",
+                            options=[
+                                {"label": i, "value": i}
+                                for i in pd.Series(
+                                    self.images.keys()
+                                ).sort_values().values
+                            ],
+                            value=1,
+                            multi=False,
+                        )
+                    ],
+                    width=4
+                )
+            ],
+            justify="center",
+            align="center",
+            className="h-50",
+        )
+        
+
+    def layout_image_table(self):
+        """Render a table with the image summary data."""
+
+        return html.Div(
+            [
+                self.image_table_element(),
+                *self.image_table_hide_columns(),
+            ]
+        )
+
+    def image_table_hide_columns(self):
+
+        return [
+            dbc.Row(
+                dbc.Col("Hide Columns:", width=4),
+                style=dict(marginTop="5px")
+            ),
+            dbc.Row(
+                dbc.Col(
+                    dcc.Dropdown(
+                        id="image-table-hidden-column-selector",
+                        options=[
+                            {'label': i, 'value': i}
+                            for i in self.summary.columns
+                        ],
+                        value=['id'],
+                        multi=True
+                    ),
+                    width=4
+                ),
+                style=dict(marginBottom="5px")
+            )
+        ]
+
+    def image_table_element(self):
+        return dash_table.DataTable(
+            id='image-table',
+            columns=[
+                {"name": i, "id": i}\
+                for i in self.summary.columns
+            ],
+            sort_action='native',
+            filter_action='native',
+            row_selectable='multi',
+            selected_rows=list(range(self.summary.shape[0])),
+            sort_mode='multi',
+            page_action='native',
+            page_current= 0,
+            page_size= 10,
+            hidden_columns=["id"],
+            data=self.summary.round(
+                select_sigfigs(self.summary)
+            ).to_dict(
+                'records'
+            ),
+            style_data_conditional=[
+                {
+                    'if': {'row_index': 'odd'},
+                    'backgroundColor': 'rgb(248, 248, 248)'
+                }
+            ],
+            style_header={
+                'backgroundColor': 'rgb(230, 230, 230)',
+                'fontWeight': 'bold'
+            },
+            css=[{"selector": ".show-hide", "rule": "display: none"}]
+        )
+
+
+    def layout_filter_data(self):
+        return "FILTER DATA PLACEHOLDER\n\n"
+
+    def layout_summary_figure(self):
+        return "SUMMARY FIGURE PLACEHOLDER\n\n"
+
     def decorate_callbacks(self):
         """Define the interactivity of the app"""
-        pass
+        
+        # Hide columns in the image summary table
+        @self.app.callback(
+            Output("image-table", "hidden_columns"),
+            [
+                Input("image-table-hidden-column-selector", "value"),
+            ]
+        )
+        def hide_columns_image_table(col_list):
+            return col_list
+
+        # Show the selected image
+        @self.app.callback(
+            Output("image-display", "figure"),
+            [
+                Input("image-display-selector", "value")
+            ]
+        )
+        def show_selected_image(ix):
+
+            # Read the image from the file
+            img = io.imread(self.images[ix])
+
+            # Show that image
+            return px.imshow(img)
 
     def run_server(
         self,
@@ -185,6 +344,35 @@ class VizApp:
             port=port,
             debug=debug,
         )
+
+def select_sigfigs(df):
+    """Pick the number of decimals to round each columns to."""
+
+    # Output will be a dict
+    decimals = dict()
+
+    # For each column
+    for col_name, col_values in df.items():
+
+        # Get the median value
+        median_value = col_values.median()
+
+        # Get the order of magnitude
+        om = int(np.log10(median_value))
+
+        # If the number is > 1,000
+        if om > 3:
+
+            # Round off to numbers
+            decimals[col_name] = 0
+
+        # Otherwise
+        else:
+
+            # Provide 4 sig figs
+            decimals[col_name] = -1 * (om - 4)
+    
+    return decimals
 
 if __name__ == "__main__":
 
@@ -245,6 +433,11 @@ Usage:
         type=int,
         default=8080,
         help='Port to host GLAM Browser'
+    )
+    parser.add_argument(
+        '--debug',
+        action="store_true",
+        help='Run in debug mode'
     )
 
     args = parser.parse_args()
