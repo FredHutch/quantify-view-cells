@@ -6,6 +6,7 @@ nextflow.enable.dsl=2
 // Set default parameters
 params.help = false
 params.function_call = false
+params.parameters = false
 params.assets = false
 params.sample_sheet = false
 params.output = false
@@ -13,6 +14,7 @@ params.module = ""
 params.max_threads = 10000
 params.output_csv = "output.csv"
 params.output_img = "output.tif"
+params.czifile = "input.czi"
 
 // Function which prints help message text
 def helpMessage() {
@@ -23,7 +25,23 @@ nextflow run FredHutch/quantify-view-cells <ARGUMENTS>
 
 Required Arguments:
     --function_call         Formatted function call which will analyze an image
-                            (named 'input.czi') and write an output (named 'output.mat')
+                            (named '{czifile}') and write an output (named 'output.mat').
+                            The function call is formatted to include keyword arguments inside {} braces.
+                            The only required parameter is "{czifile}", and all others must
+                            be referenced with the --parameters flag as described below.
+    --parameters            Any additional parameters to be used with the function call can
+                            be specified with a semi-colon delimited list. For example, the function
+
+                                "[data, dataT, O] = RajanNCSeriesNF({czifile}, {idx}, {NucFilter}, {cytosize});"
+                            
+                            Could be run with the following parameters:
+
+                                "idx=1;NucFilter=10,20,30,40;cytosize=40-50;"
+
+                            With the effect of executing the analysis for each image with all possible
+                            combinations of those variables. Note that commas indicate a list of specific
+                            values, while a dash is used to specify all integers in that range (inclusive).
+
     --assets                Any additional files which should be present in the working
                             directory in order for the script to run.
                             Multiple files (or folders) can be specified with a comma-delimited
@@ -70,6 +88,14 @@ workflow {
 
     }
 
+    // Parse the parameter string
+    parse_parameters()
+
+    // Format the function call from each set of parameters
+    format_function_call(
+        parse_parameters.out.splitText()
+    )
+
     // Add an index column to the manifest
     validate_sample_sheet(
         Channel.fromPath(params.sample_sheet)
@@ -87,7 +113,9 @@ workflow {
 
     // Run the script on each file
     run_script(
-        img_ch,
+        img_ch.combine(
+            format_function_call.out
+        ),
         assets_ch
     )
 
@@ -100,6 +128,40 @@ workflow {
     collect_tables(
         run_script.out.csv.toSortedList()
     )
+
+}
+
+process parse_parameters {
+
+    output:
+        file "parameter_combinations.txt"
+
+"""#!/bin/bash
+
+parse_parameters.py \
+    --parameters "${params.parameters}" \
+    --czifile "${params.czifile}" \
+    --output parameter_combinations.txt
+
+"""
+
+}
+
+process format_function_call {
+
+    input:
+        val params_json
+
+    output:
+        tuple val(params_json), stdout
+
+"""#!/bin/bash
+
+format_function_call.py \
+    --parameter-json '${params_json}' \
+    --function-call "${params.function_call}"
+
+"""
 
 }
 
@@ -185,19 +247,19 @@ process run_script {
     maxForks params.max_threads
   
     input:
-        tuple val(ix), path("input.czi")
+        tuple val(ix), path("${params.czifile}"), val(params_json), val(formatted_call)
         path assets
 
     output:
-        path "${ix}.${params.output_csv}", emit: csv
-        path "${ix}.${params.output_img}", emit: img
+        tuple val(params_json), path("${ix}.${params.output_csv}"), emit: csv
+        tuple val(params_json), path("${ix}.${params.output_img}"), emit: img
 
     script:
 """#!/bin/bash
 
 set -e
 
-matlab -nodisplay -nosplash -nodesktop -r "${params.function_call}"
+matlab -nodisplay -nosplash -nodesktop -r "${formatted_call}"
 
 # Add the index to the output filenames
 mv "${params.output_csv}" "${ix}.${params.output_csv}"

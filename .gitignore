@@ -1,2 +1,4 @@
 test_data/
 venv/
+sync_up.sh
+*.code-workspace

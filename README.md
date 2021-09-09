@@ -50,7 +50,23 @@ nextflow run FredHutch/quantify-view-cells <ARGUMENTS>
 
 Required Arguments:
     --function_call         Formatted function call which will analyze an image
-                            (named 'input.czi') and write an output (named 'output.mat')
+                            (named '{czifile}') and write an output (named 'output.mat').
+                            The function call is formatted to include keyword arguments inside {} braces.
+                            The only required parameter is "{czifile}", and all others must
+                            be referenced with the --parameters flag as described below.
+    --parameters            Any additional parameters to be used with the function call can
+                            be specified with a semi-colon delimited list. For example, the function
+
+                                "[data, dataT, O] = RajanNCSeriesNF({czifile}, {idx}, {NucFilter}, {cytosize});"
+                            
+                            Could be run with the following parameters:
+
+                                "idx=1;NucFilter=10,20,30,40;cytosize=40-50;"
+
+                            With the effect of executing the analysis for each image with all possible
+                            combinations of those variables. Note that commas indicate a list of specific
+                            values, while a dash is used to specify all integers in that range (inclusive).
+
     --assets                Any additional files which should be present in the working
                             directory in order for the script to run.
                             Multiple files (or folders) can be specified with a comma-delimited
@@ -76,8 +92,12 @@ which can be parsed by MATLAB and executed on a single image input (.czi) to pro
 two files, an image output and a table of data in CSV format. To make this as flexible
 as possible, the user can invoke their code using the following flags:
 
-- `function_call`: The actual MATLAB code which is invoked to process a single image input file
-named `input.czi`. This code will be executed as part of the following command: `matlab -nodisplay -nosplash -nodesktop -r {function_call}`
+- `function_call`: The actual MATLAB code which is invoked to process a single image input file.
+Any variables may be specified with `{variableName}`, and all functions must use `{czifile}` to indicate
+the position of the filename used for the input file. This code will be executed as part of the
+command: `matlab -nodisplay -nosplash -nodesktop -r {function_call}`
+- `parameters`: Additional values may be supplied for any other parameters used in the function call,
+following the pattern described in the help text above.
 - `assets`: All of the MATLAB files which will be present in the working directory when the above function is called. Wildcards make this flag more convenient to format, with `/path/to/folder/**.m` being sufficient to identify all of the files ending with `.m` across all subdirectories under `/path/to/folder/`. More than one file or glob can be specified as a comma-delimited list (no spaces).
 - `output_csv`: Use this flag to specify the name of the output CSV which is produced by the function call.
 - `output_img`: Use this flag to specify the name of the output image which is produced by the function call.
