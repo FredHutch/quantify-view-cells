@@ -201,12 +201,28 @@ process collect_tables {
 import os
 import pandas as pd
 
-# Combine all of the tables, appending a column indicating the image index
+def parse_csv(fp):
+
+    # Get the image_ix and params_ix from the filename
+    image_ix, params_ix = fp.replace(".${params.output_csv}", "").split(".", 1)
+
+    # Read the CSV
+    df = pd.read_csv(fp)
+
+    # Append the image_ix and params_ix
+    df = df.assign(
+        image_ix=image_ix,
+        params_ix=params_ix,
+    )
+
+    # Return the data
+    return df
+
+
+# Combine all of the tables, appending a column indicating the image index and the parameter index
 df = pd.concat(
     [
-        pd.read_csv(fp).assign(
-            ix=fp.replace(".${params.output_csv}", "")
-        )
+        parse_csv(fp)
         for fp in os.listdir(".")
         if fp.endswith(".${params.output_csv}")
     ]
@@ -226,7 +242,7 @@ def is_numeric(v):
 num_cols = [c for c, v in df.items() if is_numeric(v)]
 
 # Summarize each metric per image
-summary = df.groupby("ix").apply(
+summary = df.groupby(["image_ix", "params_ix"]).apply(
     lambda d: d.reindex(columns=num_cols).median()
 )
 

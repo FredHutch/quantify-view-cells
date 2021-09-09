@@ -122,8 +122,8 @@ if not os.path.exists(args.script_folder):
     print(f"Making directory {args.script_folder}")
     os.mkdir(args.script_folder)
 
-# Use `param_ix` to keep track of which combination of parameters was used
-assert "param_ix" not in params, "Cannot include param_ix in the --parameters"
+# Use `params_ix` to keep track of which combination of parameters was used
+assert "params_ix" not in params, "Cannot include params_ix in the --parameters"
 
 # Keep a list of all of the different combinations of parameters
 param_list = []
@@ -158,4 +158,4 @@ for value_comb in product(*params.values()):
 param_df = pd.DataFrame(param_list)
 
 # Write out to a file
-param_df.to_csv(args.output, index_label="param_ix")
+param_df.to_csv(args.output, index_label="params_ix")

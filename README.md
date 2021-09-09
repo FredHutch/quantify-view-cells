@@ -108,10 +108,16 @@ following the pattern described in the help text above.
 After running the workflow, three files will be copied to the output directory:
 
 - `output_images.tar.gz`: A compressed archive containing all of the image outputs.
-The name of each file will be `{ix}.{output_img}`, where `{ix}` is the number of the line
-from the sample sheet which listed the input image, and `{output_img}` is the name
-of the image output by the MATLAB code.
+The name of each file will be `{image_ix}.{params_ix}.{output_img}`,
+where `{image_ix}` is the number of the line from the sample sheet which listed the input image,
+and `{output_img}` is the name of the image output by the MATLAB code. The `{params_ix}`
+indicates the combination of parameters which were used to generate that output image.
 - `feature.info.csv.gz`: A table in CSV format which combines all of the outputs produced
-from all images. The `ix` column indicates which image was used to generate the outputs.
+from all images. The `image_ix` column indicates which image was used to generate the outputs.
+The `params_ix` column indicates which parameters were used for the analysis.
 - `image.summary.csv.gz`: A table in CSV format which contains the median numeric value
-for each image, for every column of the feature info table which only contains numbers.
+for each image (`image_ix`) and parameter combination (`params_ix`),
+for every column of the feature info table which only contains numbers.
+- `parameter.combinations.csv`: A table in CSV format which lists the combinations of
+parameters which were used for each individual analysis, including the columns `params_ix`
+which correponds to the values used in the files described above.
