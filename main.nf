@@ -89,14 +89,14 @@ workflow {
     }
 
     // Parse the parameter string
+    // This process has two outputs: 
+    //      parameter_list (a CSV)
+    //      function_calls (a list of files)
+    // The `param_ix` column in the parameter_list
+    // correponds to the filename in function_calls
     parse_parameters()
 
-    // Format the function call from each set of parameters
-    format_function_call(
-        parse_parameters.out.splitText()
-    )
-
-    // Add an index column to the manifest
+    // Add an index column to the manifest (image_ix)
     validate_sample_sheet(
         Channel.fromPath(params.sample_sheet)
     )
@@ -104,18 +104,24 @@ workflow {
     // Make a channel which includes
         // The numeric index of each image
         // The image file
-        // Any additional assets
+        // The numeric index of the parameter combination
+        // The script to run
     img_ch = validate_sample_sheet
         .out
         .splitCsv(header: true)
         .flatten()
-        .map {row -> [row.ix, file(row.uri)]}
+        .map {row -> [row.image_ix, file(row.uri)]}
+        .combine(
+            parse_parameters
+                .out
+                .function_calls
+                .flatten()
+                .map {i -> [i.name, i]}
+        )
 
     // Run the script on each file
     run_script(
-        img_ch.combine(
-            format_function_call.out
-        ),
+        img_ch,
         assets_ch
     )
 
@@ -133,33 +139,24 @@ workflow {
 
 process parse_parameters {
 
+    // Load the module(s) specified by the user
+    module params.module
+
+    // Publish the CSV of parameter combinations
+    publishDir params.output, mode: "copy", overwrite: true, pattern: "parameter.combinations.csv"
+
     output:
-        file "parameter_combinations.txt"
+        path "parameter.combinations.csv", emit: parameter_list
+        path "function_calls/*", emit: function_calls
 
 """#!/bin/bash
 
 parse_parameters.py \
     --parameters "${params.parameters}" \
     --czifile "${params.czifile}" \
-    --output parameter_combinations.txt
-
-"""
-
-}
-
-process format_function_call {
-
-    input:
-        val params_json
-
-    output:
-        tuple val(params_json), stdout
-
-"""#!/bin/bash
-
-format_function_call.py \
-    --parameter-json '${params_json}' \
-    --function-call "${params.function_call}"
+    --function-call "${params.function_call}" \
+    --output parameter.combinations.csv \
+    --script-folder function_calls
 
 """
 
@@ -247,23 +244,23 @@ process run_script {
     maxForks params.max_threads
   
     input:
-        tuple val(ix), path("${params.czifile}"), val(params_json), val(formatted_call)
+        tuple val(image_ix), path("${params.czifile}"), val(params_ix), path("custom_function.m")
         path assets
 
     output:
-        tuple val(params_json), path("${ix}.${params.output_csv}"), emit: csv
-        tuple val(params_json), path("${ix}.${params.output_img}"), emit: img
+        path "${image_ix}.${params_ix}.${params.output_csv}", emit: csv
+        path "${image_ix}.${params_ix}.${params.output_img}", emit: img
 
     script:
 """#!/bin/bash
 
 set -e
 
-matlab -nodisplay -nosplash -nodesktop -r "${formatted_call}"
+matlab -nodisplay -nosplash -nodesktop -r "custom_function ; exit"
 
 # Add the index to the output filenames
-mv "${params.output_csv}" "${ix}.${params.output_csv}"
-mv "${params.output_img}" "${ix}.${params.output_img}"
+mv "${params.output_csv}" "${image_ix}.${params_ix}.${params.output_csv}"
+mv "${params.output_img}" "${image_ix}.${params_ix}.${params.output_img}"
 """
 
 }
@@ -297,7 +294,7 @@ else
     cat "${sample_sheet_csv}" | \
     while read line; do
         if (( \$i == 0 )); then
-            echo ix,\$line
+            echo image_ix,\$line
         else
             echo \$i,\$line
         fi

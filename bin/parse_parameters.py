@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 import argparse
 from itertools import product
-import json
+import os
+import pandas as pd
 
 # Create the parser
 parser = argparse.ArgumentParser(
@@ -22,10 +23,22 @@ parser.add_argument(
     help='String used for the input image filepath (czifile)'
 )
 parser.add_argument(
+    '--function-call',
+    type=str,
+    required=True,
+    help='String used to run MATLAB'
+)
+parser.add_argument(
     '--output',
     type=str,
     required=True,
     help='Path to output file (txt), one set of parameters encoded on each line as JSON'
+)
+parser.add_argument(
+    '--script-folder',
+    type=str,
+    required=True,
+    help='Path to folder in which all analysis scripts will be written'
 )
 
 # Parse the arguments
@@ -102,14 +115,47 @@ assert "czifile" not in params, "Cannot include czifile in the --parameters"
 # Now add 'czifile' to the params
 params['czifile'] = [args.czifile]
 
-# Write out all possible versions of the parameters
-with open(args.output, "w") as handle:
+# If the script folder does not exist
+if not os.path.exists(args.script_folder):
 
-    # Iterate over all possible combinations of values
-    for value_comb in product(*params.values()):
+    # Create it
+    print(f"Making directory {args.script_folder}")
+    os.mkdir(args.script_folder)
 
-        # Format the values as a dict with the appropriate key
-        dat_comb = dict(zip(params.keys(), value_comb))
+# Use `param_ix` to keep track of which combination of parameters was used
+assert "param_ix" not in params, "Cannot include param_ix in the --parameters"
 
-        # Write out the combination of parameters as JSON
-        handle.write(json.dumps(dat_comb) + '\n')
+# Keep a list of all of the different combinations of parameters
+param_list = []
+
+# Iterate over all possible combinations of values
+for value_comb in product(*params.values()):
+
+    # Format the values as a dict with the appropriate key
+    dat_comb = dict(zip(params.keys(), value_comb))
+
+    # Format the function call and write it to a file named for this index position
+    with open(
+        os.path.join(
+            args.script_folder,
+            str(len(param_list))
+        ), 
+        "w"
+    ) as handle:
+        handle.write(
+            args.function_call.format(
+                **dat_comb
+            ).replace(
+                ";",
+                ";\n"
+            )
+        )
+
+    # Add to the list
+    param_list.append(dat_comb)
+
+# Make a DataFrame
+param_df = pd.DataFrame(param_list)
+
+# Write out to a file
+param_df.to_csv(args.output, index_label="param_ix")
