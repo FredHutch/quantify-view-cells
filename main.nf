@@ -32,11 +32,11 @@ Required Arguments:
     --parameters            Any additional parameters to be used with the function call can
                             be specified with a semi-colon delimited list. For example, the function
 
-                                "[data, dataT, O] = RajanNCSeriesNF({czifile}, {idx}, {NucFilter}, {cytosize});"
+                                "[data, dataT, O]=FunctionName('{czifile}',{idx},{paramA},{paramB});writetable(dataT, 'output.csv');imwrite(O,'output.tif','tiff')"
                             
                             Could be run with the following parameters:
 
-                                "idx=1;NucFilter=10,20,30,40;cytosize=40-50;"
+                                "idx=1;paramA=10,20,30,40;paramB=40-50;"
 
                             With the effect of executing the analysis for each image with all possible
                             combinations of those variables. Note that commas indicate a list of specific
@@ -54,8 +54,8 @@ Required Arguments:
 Optional Arguments:
     --module                If specified, load the specified EasyBuild module(s). Multiple modules may be specified in a colon-delimited list.
     --max_threads           If needed, limit the number of concurrent processes
-    --output_csv            Name of the CSV produced by the analysis script
-    --output_img            Name of the image produced by the analysis script
+    --output_csv            Name of the CSV produced by the analysis script (default: output.csv)
+    --output_img            Name of the image produced by the analysis script (default: output.tif)
 
 Webpage: https://github.com/FredHutch/quantify-view-cells
     """.stripIndent()
