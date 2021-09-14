@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import argparse
+from collections import defaultdict
 import dash
 import dash_bootstrap_components as dbc
 import dash_core_components as dcc
@@ -8,6 +9,7 @@ import dash_html_components as html
 import dash_table
 from dash.dependencies import Input, Output, State, MATCH, ALL
 from dash.exceptions import PreventUpdate
+import json
 import logging
 import numpy as np
 import os
@@ -23,6 +25,21 @@ def read_csv(fp):
     logger.info(f"Reading in {fp}")
     df = pd.read_csv(fp)
     logger.info(f"Read in {df.shape[0]:,} rows and {df.shape[1]:,} columns")
+
+    # Check for the index values for each image and combination of parameters
+
+    # Each table _must_ have a params_ix column
+    assert "params_ix" in df.columns.values, f"Did not find column `params_ix` in {fp}"
+
+    # `params_ix` must be an integer
+    df = df.assign(params_ix = df.params_ix.apply(int))
+
+    # If `image_ix` is present
+    if 'image_ix' in df.columns.values:
+    
+        # `image_ix` must be an integer
+        df = df.assign(image_ix = df.image_ix.apply(int))
+
     return df
 
 
@@ -38,11 +55,19 @@ def read_images(fp):
         with tarfile.open(fp, "r:gz") as tar:
             tar.extractall(folder)
 
-    # Keep track of the path for each image
-    images = {
-        int(fn.split(".", 1)[0]): os.path.join(folder, fn)
-        for fn in os.listdir(folder)
-    }
+    # Keep track of the path for each image, keyed by image and parameters
+    images = defaultdict(dict)
+    
+    # Iterate over each image
+    for fn in os.listdir(folder):
+
+        # Parse the image index and parameter index from the file name
+        image_ix, params_ix, _ = fn.split(".", 2)
+        image_ix = int(image_ix)
+        params_ix = int(params_ix)
+
+        # Key the images first by image index, and then by params
+        images[image_ix][params_ix] = os.path.join(folder, fn)
 
     return images
 
@@ -51,6 +76,7 @@ def launch_qvc(
     images=None,
     features=None,
     summary=None,
+    parameters=None,
     host="0.0.0.0",
     port=8000,
     debug=False
@@ -64,16 +90,17 @@ def launch_qvc(
     for fp, label in [(images, 'images'), (features, 'features'), (summary, 'summary')]:
         assert os.path.exists(fp), f"Must provide valid path to {label}, run with --help for details"
 
-    # Read in the data for both tables
+    # Read in the data for all tables
     features = read_csv(features)
     summary = read_csv(summary)
+    parameters = read_csv(parameters)
 
     # Read in all of the images
     images = read_images(images)
 
     # Set up the app
     logger.info("Initializing the VizApp object")
-    app = VizApp(features, summary, images)
+    app = VizApp(features, summary, parameters, images)
 
     # Launch it
     logger.info("Launching the server")
@@ -127,6 +154,7 @@ class VizApp:
         self,
         features,
         summary,
+        parameters,
         images,
         theme=dbc.themes.FLATLY,
         title="Quantify View Cells (QVC)",
@@ -135,6 +163,28 @@ class VizApp:
 
         # Get the logger
         self.logger = logging.getLogger()
+
+        # Attach the data
+        self.features = features
+        self.summary = summary
+        self.parameters = parameters
+        self.images = images
+
+        # Create an indexed list of all possible parameters used
+        self.index_possible_parameters()
+
+        # Make a list of all columns in the feature data which are numeric
+        self.numeric_cols = [
+            col_name
+            for col_name, col_values in self.features.items()
+            if is_numeric(col_values)
+        ]
+
+        # Sort the images by image and params index
+        self.summary.sort_values(
+            by=["image_ix", "params_ix"],
+            inplace=True
+        )
 
         # Create the Dash app
         self.app = dash.Dash(
@@ -148,95 +198,165 @@ class VizApp:
         # Suppress callback exceptions by default
         self.app.config.suppress_callback_exceptions = suppress_callback_exceptions
 
-        # Attach the data
-        self.features = features
-        self.summary = summary
-        self.images = images
-
-        # Make a list of all columns in the feature data which are numeric
-        self.numeric_cols = [
-            col_name
-            for col_name, col_values in self.features.items()
-            if is_numeric(col_values)
-        ]
-
-        # Sort the images by index
-        self.summary.sort_values(
-            by="ix",
-            inplace=True
-        )
-
-        # Rename the `ix` column to `id`
-        self.summary = self.summary.rename(
-            columns=dict(ix="id")
-        )
-
         # Set up the layout
         self.app.layout = self.layout
 
         # Attach the callbacks
         self.decorate_callbacks()
 
+    def index_possible_parameters(self):
+        """Create an indexed list of all possible parameters for each."""
+
+        self.parameter_index = {
+            param_col: dict(enumerate(param_values.drop_duplicates().sort_values().values))
+            for param_col, param_values in self.parameters.items()
+            if param_col not in ["params_ix"] and param_values.unique().shape[0] > 1
+        }
+
     def layout(self):
         """Set up the layout of the app."""
         return dbc.Container(
             [
-                # The top element is the image display
-                self.layout_image_display(),
-                
-                # Below that is a table summarizing each image
-                self.layout_image_table(),
-
-                html.Hr(),
-
-                # Next we have a menu allowing the user to filter
-                # the data points which are shown below
-                *self.layout_filter_data(),
-
-                # Finally, the bottom has an interactive
-                # figure generation utility with flexible menus
-                self.layout_summary_figure()
+                # Format the navbar at the top of the page
+                self.navbar(),
+                # All elements are grouped into tabs
+                dcc.Tabs(
+                    # Set the ID for the tabbed page
+                    id="qvc-tabs",
+                    # Show the image tab by default
+                    value="image-tab",
+                    # Set up the contents of the tabs
+                    children=[
+                        # The first tab is the image display
+                        dcc.Tab(
+                            label="Image Display",
+                            value="image-tab",
+                            children=self.layout_image_display()
+                        ),
+                        # The second tab is the image summary table
+                        dcc.Tab(
+                            label="Image Metrics",
+                            value="image-metrics-tab",
+                            children=self.layout_image_table()
+                        ),
+                        # The third tab is the feature summary table
+                        dcc.Tab(
+                            label="Feature Metrics",
+                            value="feature-metrics-tab",
+                            children=self.layout_summary_figure()
+                        )
+                    ]
+                )
             ]
+        )
+
+    def navbar(self):
+        """Format the navbar at the top of the page."""
+        return dbc.NavbarSimple(
+            brand="Quantify & View Cells",
+            color="primary",
+            dark=True
         )
 
     def layout_image_display(self):
 
         # Initialize the display with the first image
-        img = io.imread(self.images[1])
+        img = io.imread(self.images[1][0])
+
+        # Get the list of valid image indices
+        img_keys = pd.Series(self.images.keys()).sort_values().values
         
         return dbc.Row(
             [
+                dbc.Col(
+                    dbc.Form(
+                        [
+                            dbc.FormGroup([
+                                dbc.Label("Show Image (#)"),
+                                dcc.Slider(
+                                    id='image-display-selector',
+                                    value=img_keys[0],
+                                    min=img_keys[0],
+                                    max=img_keys[-1],
+                                    marks={
+                                        str(i): str(i)
+                                        for i in img_keys
+                                    },
+                                    included=False,
+                                )
+                            ])
+                        ] \
+                            # Show a slider for each of the parameters used
+                            + self.format_param_slider_list()
+                    ),
+                    # Relative width of the menu column
+                    width=4,
+                ),
                 dbc.Col(
                     dcc.Graph(
                         figure=px.imshow(img),
                         id='image-display'
                     ),
                     width=8
-                ),
-                dbc.Col(
-                    [
-                        "Show Image (#)",
-                        html.Br(),
-                        dcc.Dropdown(
-                            id="image-display-selector",
-                            options=[
-                                {"label": i, "value": i}
-                                for i in pd.Series(
-                                    self.images.keys()
-                                ).sort_values().values
-                            ],
-                            value=1,
-                            multi=False,
-                        )
-                    ],
-                    width=4
                 )
             ],
             justify="center",
             align="center",
             className="h-50",
         )
-        
+
+    def format_param_slider_list(self):
+        """Render a list of sliders to select from each parameter."""
+
+        return [
+            dbc.FormGroup(
+                [
+                    dbc.Label(f"Select {param_col}"),
+                    dcc.Slider(
+                        id=f"image-selector-{param_col}",
+                        value=0,
+                        min=0,
+                        max=len(param_values) - 1,
+                        step=1,
+                        marks={
+                            str(k): str(v)
+                            for k, v in param_values.items()
+                        },
+                        included=False,
+                    )
+                ]
+            )
+            for param_col, param_values in self.parameter_index.items()
+        ]
+
+    def infer_param_ix(self, selected_params):
+        """
+        Input is a dict with the _index_ of each param that was selected.
+        Output is the `params_ix` which corresponds to that set of values
+        """
+
+        # Start with the complete set of parameter combinations
+        df = self.parameters
+
+        # Iterate over each param
+        for param_key, param_ix in selected_params.items():
+
+            # Get the value from this index
+            param_value = self.parameter_index[param_key][param_ix]
+
+            # Filter the table
+            df = df.query(f"{param_key} == {param_value}")
+
+            # Make sure that we have some parameters left
+            msg = f"No parameter found with {param_key} == {param_value}"
+            assert df.shape[0] > 0, msg
+
+        # After filtering, there should only be one remaining
+        msg = f"Incomplete parameter filtering: ({json.dumps(selected_params)})"
+        assert df.shape[0] == 1, msg
+
+        return df["params_ix"].values[0]
+
 
     def layout_image_table(self):
         """Render a table with the image summary data."""
@@ -371,7 +491,7 @@ class VizApp:
                     self.layout_figure_display(),
                     width=8
                 )
-            ]
+            ] + self.layout_filter_data()
         )
 
     def layout_figure_options(self):
@@ -495,12 +615,29 @@ class VizApp:
             Output("image-display", "figure"),
             [
                 Input("image-display-selector", "value")
+            ] + [
+                Input(f"image-selector-{param_col}", "value")
+                for param_col in self.parameter_index.keys()
             ]
         )
-        def show_selected_image(ix):
+        def show_selected_image(*input_args):
+
+            # Parse the selected image index
+            image_ix = input_args[0]
+
+            # Get the list of parameter values
+            selected_params = dict(
+                zip(
+                    self.parameter_index.keys(),
+                    input_args[1:]
+                )
+            )
+
+            # Get the index of this combination of parameters
+            param_ix = self.infer_param_ix(selected_params)
 
             # Read the image from the file
-            img = io.imread(self.images[ix])
+            img = io.imread(self.images[image_ix][param_ix])
 
             # Show that image
             return px.imshow(img)
@@ -663,6 +800,13 @@ Usage:
         type=str,
         required=True,
         help="Compressed CSV with image-level summaries of feature data"
+    )
+
+    parser.add_argument(
+        "--parameters",
+        type=str,
+        required=True,
+        help="Table of parameters used for each analysis (CSV)"
     )
 
     parser.add_argument(
