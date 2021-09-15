@@ -43,6 +43,26 @@ def read_csv(fp):
     return df
 
 
+def add_parameters(parameters, df):
+    """
+    For a table with a `params_ix` columns, add in the appropriate
+    values for each variable from the table at self.parameters.
+    """
+
+    # Each table _must_ have a params_ix column
+    assert "params_ix" in df.columns.values, f"Did not find column `params_ix`"
+
+    # Add to the table
+    return df.assign(
+        **{
+            col_name: df.params_ix.apply(
+                col_values.get
+            )
+            for col_name, col_values in parameters.set_index("params_ix").items()
+            if col_values.unique().shape[0] > 1
+        }
+    )
+
 def read_images(fp):
 
     logger = logging.getLogger()
@@ -94,6 +114,11 @@ def launch_qvc(
     features = read_csv(features)
     summary = read_csv(summary)
     parameters = read_csv(parameters)
+
+    # Expand the `params_ix` column from `features` and `summary`  to
+    # include the actual values from `parameters`
+    features = add_parameters(parameters, features)
+    summary = add_parameters(parameters, summary)
 
     # Read in all of the images
     images = read_images(images)
@@ -177,13 +202,33 @@ class VizApp:
         self.numeric_cols = [
             col_name
             for col_name, col_values in self.features.items()
-            if is_numeric(col_values)
+            if is_numeric(col_values) and col_name not in ["image_ix", "params_ix"]
         ]
 
         # Sort the images by image and params index
         self.summary.sort_values(
             by=["image_ix", "params_ix"],
             inplace=True
+        )
+
+        # Set up the type of plots which are available
+        self.plot_types = dict(
+            scatter=dict(
+                label="Scatter"
+            ),
+            heatmap=dict(
+                label="Heatmap"
+            ),
+            contour=dict(
+                label="Contour"
+            )
+        )
+
+        # Set up the options (ids and labels) for formatting the figures
+        self.data_display_options = dict(
+            x="X-axis",
+            y="Y-axis",
+            color="Color"
         )
 
         # Create the Dash app
@@ -237,13 +282,13 @@ class VizApp:
                         dcc.Tab(
                             label="Image Metrics",
                             value="image-metrics-tab",
-                            children=self.layout_image_table()
+                            children=self.layout_data_display("summary")
                         ),
                         # The third tab is the feature summary table
                         dcc.Tab(
                             label="Feature Metrics",
                             value="feature-metrics-tab",
-                            children=self.layout_summary_figure()
+                            children=self.layout_data_display("features")
                         )
                     ]
                 )
@@ -358,74 +403,127 @@ class VizApp:
         return df["params_ix"].values[0]
 
 
-    def layout_image_table(self):
-        """Render a table with the image summary data."""
+    def layout_data_display(self, data_type):
+        """
+        Display data based on the `data_type` provided, either 'features' or 'images'
+        """
 
-        return html.Div(
+        return dbc.Container(
             [
-                self.image_table_element(),
-                *self.image_table_hide_columns(),
+                dbc.Row(
+                    [
+                        # Selectors used to format the display
+                        dbc.Col(
+                            self.format_data_display(data_type),
+                            width=4
+                        ),
+                        # The actual data display element
+                        dbc.Col(
+                            self.render_data_display(data_type),
+                            width=8
+                        )
+                    ]
+                )
             ]
         )
 
-    def image_table_hide_columns(self):
+    def format_data_display(self, data_type):
+        """
+        Render the selectors used to drive a data display.
+        """
 
-        return [
-            dbc.Row(
-                dbc.Col("Hide Columns:", width=4),
-                style=dict(marginTop="5px")
-            ),
-            dbc.Row(
-                dbc.Col(
-                    dcc.Dropdown(
-                        id="image-table-hidden-column-selector",
-                        options=[
-                            {'label': i, 'value': i}
-                            for i in self.summary.columns
-                        ],
-                        value=['id'],
-                        multi=True
+        return dbc.Form(
+            [
+                # PLOT TYPE
+                dbc.FormGroup(
+                    [
+                        dbc.Label("Plot Type"),
+                        dcc.Dropdown(
+                            id=dict(
+                                elem="data-selector",
+                                data_type=data_type,
+                                input_id="plot-type"
+                            ),
+                            options=[
+                                dict(
+                                    label=v["label"],
+                                    value=k
+                                )
+                                for k, v in self.plot_types.items()
+                            ],
+                            value=list(self.plot_types.keys())[0]
+                        )
+                    ]
+                )
+            ] + [
+                # X, Y, and color
+                dbc.FormGroup(
+                    [
+                        dbc.Label(input_label),
+                        dcc.Dropdown(
+                            id=dict(
+                                elem="data-selector",
+                                data_type=data_type,
+                                input_id=input_id
+                            ),
+                            options=[
+                                dict(
+                                    label=col_name,
+                                    value=col_name
+                                )
+                                for col_name in self.numeric_cols
+                            ],
+                            value=self.numeric_cols[i]
+                        )
+                    ]
+                )
+                for i, [input_id, input_label] in enumerate(self.data_display_options.items())
+            ] + [
+                # FILTER BY PARAMETER
+                dbc.Collapse(
+                    id=dict(
+                        elem_data="selector-collapse",
+                        data_type=data_type,
+                        filter_param=param_key
                     ),
-                    width=4
-                ),
-                style=dict(marginBottom="5px")
+                    children=dbc.FormGroup(
+                        [
+                            dbc.Label(param_key),
+                            dcc.Dropdown(
+                                id=dict(
+                                    elem="data-selector",
+                                    data_type=data_type,
+                                    filter_param=param_key
+                                ),
+                                options=[
+                                    dict(
+                                        label=val_str,
+                                        value=val_ix,
+                                    )
+                                    for val_ix, val_str in param_values.items()
+                                ],
+                                value=0
+                            )
+                        ]
+                    ),
+                    is_open=True
+                )
+                for param_key, param_values in self.parameter_index.items()
+            ],
+            style=dict(
+                marginTop="10px"
             )
-        ]
-
-    def image_table_element(self):
-        return dash_table.DataTable(
-            id='image-table',
-            columns=[
-                {"name": i, "id": i}\
-                for i in self.summary.columns
-            ],
-            sort_action='native',
-            filter_action='native',
-            row_selectable='multi',
-            selected_rows=list(range(self.summary.shape[0])),
-            sort_mode='multi',
-            page_action='native',
-            page_current= 0,
-            page_size= 10,
-            hidden_columns=["id"],
-            data=self.summary.round(
-                select_sigfigs(self.summary)
-            ).to_dict(
-                'records'
-            ),
-            style_data_conditional=[
-                {
-                    'if': {'row_index': 'odd'},
-                    'backgroundColor': 'rgb(248, 248, 248)'
-                }
-            ],
-            style_header={
-                'backgroundColor': 'rgb(230, 230, 230)',
-                'fontWeight': 'bold'
-            },
-            css=[{"selector": ".show-hide", "rule": "display: none"}]
         )
 
+    def render_data_display(self, data_type):
+        """Placeholder to render the data display."""
+
+        return dcc.Graph(
+            id=dict(
+                elem="data-display",
+                data_type=data_type
+            )
+        )
 
     def layout_filter_data(self):
 
@@ -535,59 +633,46 @@ class VizApp:
             )
         ]
 
-    def layout_figure_display(self):
-
-        initial_type = "scatter"
-        initial_x = self.numeric_cols[0]
-        initial_y = self.numeric_cols[1]
-
-        filter_col = self.numeric_cols[0]
-        filter_values = self.features[filter_col]
-        filter_min = filter_values.min()
-        filter_max = filter_values.max()
-        
-        return dcc.Graph(
-            figure=self.feature_display(
-                initial_type,
-                initial_x,
-                initial_y,
-                filter_col,
-                filter_min,
-                filter_max,
-            ),
-            id="figure-display"
-        )
-
     def feature_display(
         self,
-        figure_type,
-        x_col,
-        y_col,
-        filter_col,
-        filter_min,
-        filter_max
+        plot_params
     ):
 
+        self.logger.info(json.dumps(plot_params, indent=3))
+
+        # Set up the data to be used for plotting
+        if plot_params["data_type"] == "summary":
+            plot_df = self.summary
+        else:
+            assert plot_params["data_type"] == "features", plot_params["data_type"]
+            plot_df = self.features
+
+        # Check each of the parameters which have been specified
+        for param_key, param_value_i in plot_params["filter_param"].items():
+
+            # If this parameter is not being used in the display
+            if param_key not in plot_params["input_id"].values():
+
+                # Get the selected value of the parameter to show
+                param_value = self.parameter_index[param_key][param_value_i]
+                self.logger.info(f"Filtering {param_key} to {param_value}")
+                plot_df = plot_df.query(f"{param_key} == {param_value}")
+                assert plot_df.shape[0] > 0, "No data to display"
+
         # Define the function which will be used
-        plotly_f = dict(
-            scatter = px.scatter,
-            heatmap = px.density_heatmap,
-            contour = px.density_contour,
-        )[figure_type]
+        plotly_f, plotly_kwargs = dict(
+            scatter = (px.scatter, ["x", "y", "color"]),
+            heatmap = (px.density_heatmap, ["x", "y"]),
+            contour = (px.density_contour, ["x", "y"]),
+        )[plot_params["input_id"]["plot-type"]]
 
-        filtered_data = self.features.query(
-            f"{filter_col} >= {filter_min}"
-        ).query(
-            f"{filter_col} <= {filter_max}"
-        )
-
-        msg = f"Filtering invalid: {filter_col} >= {filter_min}, <= {filter_max}"
-        assert filtered_data.shape[0] > 0, msg
-
+        # Set up the figure
         fig = plotly_f(
-            filtered_data,
-            x=x_col,
-            y=y_col,
+            plot_df,
+            **{
+                k: plot_params["input_id"][k]
+                for k in plotly_kwargs
+            }
         )
 
         fig.update_layout(
@@ -600,16 +685,6 @@ class VizApp:
     def decorate_callbacks(self):
         """Define the interactivity of the app"""
         
-        # Hide columns in the image summary table
-        @self.app.callback(
-            Output("image-table", "hidden_columns"),
-            [
-                Input("image-table-hidden-column-selector", "value"),
-            ]
-        )
-        def hide_columns_image_table(col_list):
-            return col_list
-
         # Show the selected image
         @self.app.callback(
             Output("image-display", "figure"),
@@ -641,6 +716,89 @@ class VizApp:
 
             # Show that image
             return px.imshow(img)
+
+        # Show / hide the collapse for the parameter menus
+        @self.app.callback(
+            Output(
+                dict(
+                    elem_data="selector-collapse",
+                    data_type=MATCH,
+                    filter_param=ALL
+                ),
+                "is_open"
+            ),
+            [
+                Input(
+                    dict(
+                        elem="data-selector",
+                        data_type=MATCH,
+                        input_id=ALL
+                    ),
+                    "value"
+                )
+            ]
+        )
+        def show_hide_filter_param_collapse(input_list):
+            ctx = dash.callback_context
+
+            # Close the collapse if the param was selected
+            # as a continuous element in the display
+            return [
+                elem["id"]["filter_param"] not in input_list
+                for elem in ctx.outputs_list
+            ]
+
+        # Render each of the data graphs
+        @self.app.callback(
+            Output(
+                dict(
+                    elem="data-display",
+                    data_type=MATCH
+                ),
+                "figure"
+            ),
+            [
+                Input(
+                    dict(
+                        elem="data-selector",
+                        data_type=MATCH,
+                        input_id=ALL
+                    ),
+                    "value"
+                ),
+                Input(
+                    dict(
+                        elem="data-selector",
+                        data_type=MATCH,
+                        filter_param=ALL
+                    ),
+                    "value"
+                )
+            ]
+        )
+        def render_data_figure(*_):
+            # Get the callback context
+            ctx = dash.callback_context
+
+            # Format the input arguments
+            plot_params = {
+                input_type: {
+                    i["id"][input_type]: i["value"]
+                    for i in input_elems
+                }
+                for input_type, input_elems in zip(
+                    ["input_id", "filter_param"],
+                    ctx.inputs_list
+                )
+            }
+
+            # Get the plot type as well
+            plot_params["data_type"] = ctx.inputs_list[0][0]['id']['data_type']
+
+            # Return a figure based on these params
+            return self.feature_display(
+                plot_params
+            )
 
         # Update the min and max for the filter column
         @self.app.callback(
