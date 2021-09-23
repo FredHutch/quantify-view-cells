@@ -92,7 +92,7 @@ workflow {
     // This process has two outputs: 
     //      parameter_list (a CSV)
     //      function_calls (a list of files)
-    // The `param_ix` column in the parameter_list
+    // The `params_ix` column in the parameter_list
     // correponds to the filename in function_calls
     parse_parameters()
 
