@@ -6,10 +6,7 @@ import dash
 import dash_bootstrap_components as dbc
 import dash_core_components as dcc
 import dash_html_components as html
-import dash_table
-from dash.dependencies import Input, Output, State, MATCH, ALL
-from dash.exceptions import PreventUpdate
-import json
+from dash.dependencies import Input, Output, MATCH, ALL
 import logging
 import numpy as np
 import os
@@ -785,11 +782,6 @@ class VizApp:
 
             # Get the index of this combination of parameters
             param_ix = self.infer_param_ix(selected_params)
-
-            self.logger.info(input_args)
-            self.logger.info(selected_params)
-            self.logger.info(param_ix)
-            self.logger.info(image_ix)
 
             # Read the image from the file
             img = io.imread(self.images[image_ix][param_ix])
