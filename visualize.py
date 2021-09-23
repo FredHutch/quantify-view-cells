@@ -332,17 +332,25 @@ class VizApp:
                             ])
                         ] \
                             # Show a slider for each of the parameters used
-                            + self.format_param_slider_list()
+                            + self.format_param_slider_list() \
+                            # Add a checkbox for annotating centroids
+                            + self.format_centroid_checkbox()
                     ),
                     # Relative width of the menu column
                     width=4,
                 ),
                 dbc.Col(
-                    dcc.Graph(
-                        figure=px.imshow(img),
-                        id='image-display'
-                    ),
-                    width=8
+                    [
+                        dcc.Graph(
+                            figure=px.imshow(img),
+                            id='image-display'
+                        ),
+                        dbc.Label(
+                            "Click and drag to zoom in, double click to zoom out"
+                        )
+                    ],
+                    width=8,
+                    style=dict(textAlign='center')
                 )
             ],
             justify="center",
@@ -372,6 +380,26 @@ class VizApp:
                 ]
             )
             for param_col, param_values in self.parameter_index.items()
+        ]
+
+    def format_centroid_checkbox(sefl):
+        """Render a checkbox asking if the user would like to annotate the centroids."""
+
+        return [
+            dbc.FormGroup(
+                [
+                    dbc.Label(f"Annotate Centroids"),
+                    dcc.RadioItems(
+                        id="annotate-centroids",
+                        options=[
+                            dict(label="On", value="On"),
+                            dict(label="Off", value="Off")
+                        ],
+                        value="On",
+                        labelStyle={"margin-right": "20px"}
+                    )
+                ]
+            )
         ]
 
     def infer_param_ix(self, selected_params):
@@ -638,8 +666,6 @@ class VizApp:
         plot_params
     ):
 
-        self.logger.info(json.dumps(plot_params, indent=3))
-
         # Set up the data to be used for plotting
         if plot_params["data_type"] == "summary":
             plot_df = self.summary
@@ -682,6 +708,51 @@ class VizApp:
 
         return fig
 
+    def annotate_image(self, fig, image_ix, param_ix, x_col="Centroid_1", y_col="Centroid_2"):
+        """Add any feature information to the image display."""
+
+        # Get the set of features from this image
+        image_features = self.features.query(
+            f"params_ix == {param_ix}"
+        ).query(
+            f"image_ix == {image_ix}"
+        )
+
+        # If there is no data present, do not add any annotatinos
+        if image_features.shape[0] == 0:
+            return fig
+
+        # If the centroid columns are not present
+        if x_col not in image_features.columns.values:
+            return fig
+        if y_col not in image_features.columns.values:
+            return fig
+
+        fig.add_trace(
+            go.Scatter(
+                x=image_features[x_col],
+                y=image_features[y_col],
+                mode="markers",
+                hovertext=self.format_hovertext(image_features),
+                hoverinfo="text"
+            )
+        )
+
+        return fig
+
+    def format_hovertext(self, image_features):
+        """Format the hovertext for the image display."""
+
+        return image_features.apply(
+            lambda r: "<br>".join(
+                [
+                    f"{k}: {v}"
+                    for k, v in r.items()
+                ]
+            ),
+            axis=1
+        )
+
     def decorate_callbacks(self):
         """Define the interactivity of the app"""
         
@@ -689,7 +760,8 @@ class VizApp:
         @self.app.callback(
             Output("image-display", "figure"),
             [
-                Input("image-display-selector", "value")
+                Input("image-display-selector", "value"),
+                Input("annotate-centroids", "value"),
             ] + [
                 Input(f"image-selector-{param_col}", "value")
                 for param_col in self.parameter_index.keys()
@@ -700,22 +772,53 @@ class VizApp:
             # Parse the selected image index
             image_ix = input_args[0]
 
+            # Parse the flag for whether the centroids should be annotated
+            annotate_centroids = input_args[1] == "On"
+
             # Get the list of parameter values
             selected_params = dict(
                 zip(
                     self.parameter_index.keys(),
-                    input_args[1:]
+                    input_args[2:]
                 )
             )
 
             # Get the index of this combination of parameters
             param_ix = self.infer_param_ix(selected_params)
 
+            self.logger.info(input_args)
+            self.logger.info(selected_params)
+            self.logger.info(param_ix)
+            self.logger.info(image_ix)
+
             # Read the image from the file
             img = io.imread(self.images[image_ix][param_ix])
 
+            # Make a figure which just contains the image
+            fig = px.imshow(img)
+
+            # If the user has selected the "Annotate Centroids" radio button
+            if annotate_centroids:
+
+                # Add points with mouseover to every image
+                fig = self.annotate_image(
+                    fig,
+                    image_ix,
+                    param_ix
+                )
+
+                # Don't let the figure expand beyond the image
+                fig.update_layout(
+                    xaxis=dict(
+                        range=[0, img.shape[0]]
+                    ),
+                    yaxis=dict(
+                        range=[img.shape[1], 0]
+                    )
+                )
+
             # Show that image
-            return px.imshow(img)
+            return fig
 
         # Show / hide the collapse for the parameter menus
         @self.app.callback(
