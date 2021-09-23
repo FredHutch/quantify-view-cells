@@ -121,3 +121,37 @@ for every column of the feature info table which only contains numbers.
 - `parameter.combinations.csv`: A table in CSV format which lists the combinations of
 parameters which were used for each individual analysis, including the columns `params_ix`
 which correponds to the values used in the files described above.
+
+## Standard Protocol
+
+To run your analysis with this workflow, you may use the following steps:
+
+1. Make a folder for this analysis and navigate to it with the terminal;
+2. Copy the sample sheet listing paths to all input images to the analysis folder (e.g. `sample.sheet.csv`);
+3. Make a `params.json` file containing the parameters for the analysis, for example:
+
+```
+{
+    "function_call": "[data, dataT, O]=FunctionName('{czifile}',{idx},{paramA},{paramB});writetable(dataT, 'output.csv');imwrite(O,'output.tif','tiff')",
+    "parameters": "idx=1;paramA=1000,3000,5000;paramB=10,25,50,75,100;",
+    "assets": "/path/to/assets/**.m",
+    "sample_sheet": "sample.sheet.csv",
+    "output": "/path/to/output/directory/",
+    "module": "MATLAB/R2020a:Python/3.8.6-GCCcore-10.2.0",
+    "max_threads": 5
+}
+```
+4. Make a `run.sh` script which contains the command needed to run the workflow, for example:
+```#!/bin/bash
+nextflow \
+	run \
+	FredHutch/quantify-view-cells \
+		-r main \
+        -params-file params.json \
+		-with-report report.html \
+		-resume
+```
+
+5. Start the workflow with `bash run.sh`
+
+After running the workflow, all output files will be placed in `/path/to/output/directory/` (from the params JSON) and a summary of the entire workflow execution will be written to `report.html`.
