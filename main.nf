@@ -151,6 +151,10 @@ process parse_parameters {
 
 """#!/bin/bash
 
+# List all installed python modules (for debugging)
+echo "Installed python modules"
+/usr/bin/env python3 -m pip freeze
+
 parse_parameters.py \
     --parameters "${params.parameters}" \
     --czifile "${params.czifile}" \
