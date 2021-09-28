@@ -2,6 +2,11 @@
 import argparse
 from itertools import product
 import os
+import sys
+
+print(f"Python executable: {sys.executable}")
+print(f"Python path: {sys.path}")
+
 import pandas as pd
 
 # Create the parser
