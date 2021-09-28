@@ -155,6 +155,9 @@ process parse_parameters {
 echo "Installed python modules"
 /usr/bin/env python3 -m pip freeze
 
+echo "Making sure that pandas is installed"
+/usr/bin/env python3 -c "import pandas as pd"
+
 parse_parameters.py \
     --parameters "${params.parameters}" \
     --czifile "${params.czifile}" \
